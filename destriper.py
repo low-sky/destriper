@@ -37,7 +37,7 @@ def frequency_calc(image):
     return fxx0,fyy0
 
 def find_cutoff(image):
-    cutoff = np.percentile(np.abs(image),95.4499736)
+    cutoff = np.percentile(np.abs(image[np.isfinite(image)]),95.4499736)
     print 'peak cutoff: ',np.abs(cutoff)
     return cutoff
 
@@ -94,10 +94,9 @@ def mask_make(mask,image):
     phase = np.random.rand(coord_change[0].shape[0])
     real = amplitude.real*np.cos(2*np.pi*phase)
     imag = amplitude.real*np.sin(2*np.pi*phase)
-    
     #replace noise values, return new map
-    newvals = np.vectorize(complex)(real,imag)
-  
+    newvals = np.vectorize(np.complex)(real,imag)
+#    newvals = np.complex(real,imag)
     noise_removed[coord_change[0],coord_change[1]] = newvals[:]
     
     
@@ -130,9 +129,6 @@ def fftclean(input_file,output_file):
     for i in range(image300.shape[0]):
         fft_cube30[i,:,:] = fft_plot(image300[i,:,:])
         
-    
-   
-        
     print 'fft complete'
 
     # find frequency cubes
@@ -145,7 +141,7 @@ def fftclean(input_file,output_file):
     # repair spikes in moment map
     repaired, output = mask_make(mask,fft_image0)
     hdu = fits.PrimaryHDU(data=mask)
-    hdu.writeto('a24mom0mask.fits')
+#    hdu.writeto('a24mom0mask.fits')
    # hdu = fits.PrimaryHDU(data=np.abs(output))
    # hdu.writeto('a24mom0fftmedian.fits')
     # use mask to sample and repair noise regions in each channel of fft cube
