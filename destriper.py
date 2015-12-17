@@ -30,7 +30,7 @@ def frequency_calc(image):
     freqsx00 = np.fft.fftshift(freqsx0)
     freqsy0 = np.fft.fftfreq(image.shape[1])
     freqsy00 = np.fft.fftshift(freqsy0)
-    fxx0,fyy0 = np.meshgrid(freqsx00,freqsy00)
+    fxx0,fyy0 = np.meshgrid(freqsx00,freqsy00,indexing='ij')
     
     return fxx0,fyy0
 
@@ -111,20 +111,20 @@ def fftclean(InputFile,OutputFile=None):
     print 'starting clean..'
     cubes = SpectralCube.read(InputFile,format='fits')
     momentmap = cubes.moment0(axis=0)
-    image00 = np.nan_to_num(momentmap.value)
+    moment0 = np.nan_to_num(momentmap.value)
 
-    image000 = np.ndarray.astype(image00,dtype=float)
+    moment0 = np.ndarray.astype(moment0,dtype=float)
 
-    image3 = fits.getdata(InputFile)
-    image30 = np.nan_to_num(image3)
-    image300 = np.ndarray.astype(image30,dtype=float)
+    datacube = fits.getdata(InputFile)
+    datacube = np.nan_to_num(datacube)
+    datacube = np.ndarray.astype(datacube,dtype=float)
             
-    fft_image0 = fft_plot(image000)
+    fft_image0 = fft_plot(moment0)
    # hdu = fits.PrimaryHDU(data=np.abs(fft_image0))
    # hdu.writeto('a24mom0fft.fits')
-    fft_cube30 = np.ndarray(shape=image300.shape,dtype=complex)
-    for i in range(image300.shape[0]):
-        fft_cube30[i,:,:] = fft_plot(image300[i,:,:])
+    fft_cube = np.ndarray(shape=datacube.shape,dtype=complex)
+    for i in range(datacube.shape[0]):
+        fft_cube[i,:,:] = fft_plot(datacube[i,:,:])
         
     print 'fft complete'
 
@@ -142,21 +142,21 @@ def fftclean(InputFile,OutputFile=None):
    # hdu = fits.PrimaryHDU(data=np.abs(output))
    # hdu.writeto('a24mom0fftmedian.fits')
     # use mask to sample and repair noise regions in each channel of fft cube
-    cube30_repair = np.ndarray(shape=fft_cube30.shape,dtype=complex)
-    inverse_cube = np.ndarray(shape=fft_cube30.shape)
-    mediancube = np.ndarray(shape=fft_cube30.shape)
-    for i in range(fft_cube30.shape[0]):
-        new_vals, output = mask_make(mask,fft_cube30[i,:,:])
-        cube30_repair[i,:,:] = new_vals
+    cube_repair = np.ndarray(shape=fft_cube.shape,dtype=complex)
+    inverse_cube = np.ndarray(shape=fft_cube.shape)
+    mediancube = np.ndarray(shape=fft_cube.shape)
+    for i in range(fft_cube.shape[0]):
+        new_vals, output = mask_make(mask,fft_cube[i,:,:])
+        cube_repair[i,:,:] = new_vals
         mediancube[i,:,:] = output
-        inverse_cube[i,:,:] = inverse_transform(cube30_repair[i,:,:])
+        inverse_cube[i,:,:] = inverse_transform(cube_repair[i,:,:])
         
     head = fits.getheader(InputFile)
     cubewcs = WCS(head)
     OutputCube = SpectralCube(data=inverse_cube.astype(np.float32),wcs=cubewcs)
 
-    if isinstance(OutFile,basestring):
-        OutputCube.write(OutFile)
+    if isinstance(OutputFile,basestring):
+        OutputCube.write(OutputFile)
         return(OutputCube)
 
     else:
