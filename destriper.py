@@ -1,27 +1,27 @@
 #!/usr/bin/env python
 import astropy.io.fits as fits
 import numpy as np
-import matplotlib.pyplot as p
+#import matplotlib.pyplot as plt
 from spectral_cube.spectral_cube import SpectralCube, LazyMask, BooleanArrayMask, Projection
-import spectral_cube.io
-from signal_id.noise import Noise
-from radio_beam import beam
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import scipy.stats as ss
-import scipy.signal as sg
+#import spectral_cube.io
+#from signal_id.noise import Noise
+#from radio_beam import beam
+#from mpl_toolkits.axes_grid1 import make_axes_locatable
+#import scipy.stats as ss
+#import scipy.signal as sg
 from scipy import fftpack
-import scipy.ndimage as snd
+import scipy.ndimage as ndimage
 import os
 import sys
+import warnings
+from astropy.wcs import WCS
 
 def fft_plot(image):
     # Take the fourier transform of the image.
     F1 = fftpack.fft2(image)
-    
     # Now shift the quadrants around so that low spatial frequencies are in
     # the center of the 2D fourier transformed image.
     F2 = fftpack.fftshift( F1 )
-    #p.imshow(F2)    
     return F2
 
 def frequency_calc(image):
@@ -31,8 +31,6 @@ def frequency_calc(image):
     freqsy0 = np.fft.fftfreq(image.shape[1])
     freqsy00 = np.fft.fftshift(freqsy0)
     fxx0,fyy0 = np.meshgrid(freqsx00,freqsy00)
-    
-
     
     return fxx0,fyy0
 
@@ -47,32 +45,34 @@ def find_peaks(fftimage,fxx,fyy):
     #orientation of the noise in fft image. 
 
     # determine central emission region around frequency valye of 0 in x and y
-    cutoff = np.where( np.abs(np.sqrt(fxx**2+fyy**2)) < 0.06)
-    cutoff2 = np.where((np.abs(fyy) < 0.004) & (np.abs(fxx) > 0.03)) # trim along axis that shows noise
+    cutoff = np.abs(np.sqrt(fxx**2+fyy**2)) < 0.06
 
+    # trim along axis that shows noise;  hardwired to be the y-axis here.
+    cutoff2 = (np.abs(fyy) < 0.004) & (np.abs(fxx) > 0.03)
+    
     #create 2D mask
+
     fftmask = np.ones(fftimage.shape)
-    fftmask[cutoff[0],cutoff[1]] = 0.
-    fftmask[cutoff2[1],cutoff2[0]] = 1.
-    fftmask[fftmask[:] == 0.] = np.nan
+    fftmask[cutoff] = 0.
+    fftmask[cutoff2] = 1.
+    fftmask[(fftmask == 0.)] = np.nan
+
     mask_image = np.copy(fftimage)
     maskpeak = mask_image*fftmask
     #determine scaling factor
     threshold = find_cutoff(maskpeak)
     #find peaks
-    maxmap = snd.filters.maximum_filter(np.abs(maskpeak).real,size=[3,3])
+    maxmap = ndimage.filters.maximum_filter(np.abs(maskpeak).real,size=[3,3])
     #maxima = (np.abs(maskpeak) == maxmap)
-    data_min = snd.filters.median_filter(np.abs(maskpeak).real, size=[3,3])
+    data_min = ndimage.filters.median_filter(np.abs(maskpeak).real, size=[3,3])
     diffmap = (maxmap - data_min)
     diff = (diffmap > threshold)
    
     invc = np.invert(diff)
     invc1 = np.ones(invc.shape)
-    invalids = np.where(invc == False)
-    
-    invc1[invalids[0],invalids[1]] = np.nan
+    invc1[~invc] = np.nan
 
-    print 'repairing ',invalids[0].shape[0],' values'
+#    print 'repairing ',invalids[0].shape[0],' values'
     return invc1
 
 def inverse_transform(repaired_image):
@@ -87,7 +87,7 @@ def mask_make(mask,image):
     coord_change = np.where( np.isnan(mask))
 
     # create median filter
-    output = snd.filters.median_filter(np.absolute(image).real,size=[1,15])
+    output = ndimage.filters.median_filter(np.absolute(image).real,size=[1,15])
 
     # determine amplitude and random phase values to replace noise spikes
     amplitude = output[coord_change[0],coord_change[1]]
@@ -98,9 +98,7 @@ def mask_make(mask,image):
     newvals = np.vectorize(np.complex)(real,imag)
 #    newvals = np.complex(real,imag)
     noise_removed[coord_change[0],coord_change[1]] = newvals[:]
-    
-    
-    
+        
     return noise_removed, output
 
 def fitswrite(initial_image, final_image, name):
@@ -109,16 +107,15 @@ def fitswrite(initial_image, final_image, name):
     hdu = fits.PrimaryHDU(data = final_image, header=header)
     hdu.writeto(name)
     
-def fftclean(input_file,output_file):
-   # input_file = 'a20_trim_fit2_clean.fits'
+def fftclean(InputFile,OutputFile=None):
     print 'starting clean..'
-    cubes = SpectralCube.read(input_file,format='fits')
+    cubes = SpectralCube.read(InputFile,format='fits')
     momentmap = cubes.moment0(axis=0)
     image00 = np.nan_to_num(momentmap.value)
 
     image000 = np.ndarray.astype(image00,dtype=float)
 
-    image3 = fits.getdata(input_file)
+    image3 = fits.getdata(InputFile)
     image30 = np.nan_to_num(image3)
     image300 = np.ndarray.astype(image30,dtype=float)
             
@@ -153,12 +150,21 @@ def fftclean(input_file,output_file):
         cube30_repair[i,:,:] = new_vals
         mediancube[i,:,:] = output
         inverse_cube[i,:,:] = inverse_transform(cube30_repair[i,:,:])
-    inverse_cube2 = inverse_cube.astype(np.float32)
-    head = fits.getheader(input_file)
+        
+    head = fits.getheader(InputFile)
+    cubewcs = WCS(head)
+    OutputCube = SpectralCube(data=inverse_cube.astype(np.float32),wcs=cubewcs)
+
+    if isinstance(OutFile,basestring):
+        OutputCube.write(OutFile)
+        return(OutputCube)
+
+    else:
+        return(OutputCube)
 
     import pdb ; pdb.set_trace()
 
 if __name__=="__main__":
-    input_file = sys.argv[1]
+    InputFile = sys.argv[1]
     output_file = sys.argv[2]
-    fftclean(input_file,output_file)
+    fftclean(InputFile,OutputFile = output_file)
