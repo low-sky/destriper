@@ -80,15 +80,40 @@ def inverse_transform(repaired_image):
     inverse0 = fftpack.ifft2(inverseshift0)
     return inverse0.real
 
+def fillbad(blanked):
+    from scipy import interpolate
+    valid_mask = ~np.isnan(blanked)
+    coords = np.array(np.nonzero(valid_mask)).T
+    values = blanked[valid_mask]
+
+    it = interpolate.LinearNDInterpolator(coords, values, fill_value=0)
+    output = it(list(np.ndindex(blanked.shape))).reshape(blanked.shape)
+    return(output)
+
 def mask_make(mask,image):
 
     # create map excluding central emission region
     noise_removed = image*mask
-    coord_change = np.where( np.isnan(mask))
-
+    coord_change = np.where(np.isnan(mask))
+    blanked = np.copy(image)
+    blanked *= mask
     # create median filter
-    output = ndimage.filters.median_filter(np.absolute(image).real,size=[1,15])
+    from scipy import interpolate
+    valid_mask = ~np.isnan(blanked)
+    coords = np.array(np.nonzero(valid_mask)).T
+    values = blanked[valid_mask]
 
+    it = interpolate.LinearNDInterpolator(coords, values, fill_value=0)
+    output = it(list(np.ndindex(image.shape))).reshape(image.shape)
+
+
+#    output = ndimage.filters.generic_filter(np.absolute(blanked).real,
+#                                            np.nanmedian,size=[1,15])
+#    output2 = ndimage.filters.generic_filter(output,
+#                                            np.nanmedian,size=[1,5])
+#    output[np.isnan(output)]=output2[np.isnan(output)]
+
+#    import pdb; pdb.set_trace()
     # determine amplitude and random phase values to replace noise spikes
     amplitude = output[coord_change[0],coord_change[1]]
     phase = np.random.rand(coord_change[0].shape[0])
@@ -96,10 +121,9 @@ def mask_make(mask,image):
     imag = amplitude.real*np.sin(2*np.pi*phase)
     #replace noise values, return new map
     newvals = np.vectorize(np.complex)(real,imag)
-#    newvals = np.complex(real,imag)
     noise_removed[coord_change[0],coord_change[1]] = newvals[:]
-        
-    return noise_removed, output
+
+    return noise_removed,output
 
 def fitswrite(initial_image, final_image, name):
     #header = initial_image.wcs.to_header()
@@ -107,9 +131,10 @@ def fitswrite(initial_image, final_image, name):
     hdu = fits.PrimaryHDU(data = final_image, header=header)
     hdu.writeto(name)
     
-def fftclean(InputFile,OutputFile=None):
+def fftclean(InputFile,OutputFile=None,SaveDiagnostics=False):
     print 'starting clean..'
     cubes = SpectralCube.read(InputFile,format='fits')
+    root = InputFile.replace('.fits', '_fftclean')
     momentmap = cubes.moment0(axis=0)
     moment0 = np.nan_to_num(momentmap.value)
 
@@ -120,8 +145,10 @@ def fftclean(InputFile,OutputFile=None):
     datacube = np.ndarray.astype(datacube,dtype=float)
             
     fft_image0 = fft_plot(moment0)
-   # hdu = fits.PrimaryHDU(data=np.abs(fft_image0))
-   # hdu.writeto('a24mom0fft.fits')
+    if SaveDiagnostics:
+        hdu = fits.PrimaryHDU(data=np.abs(fft_image0))
+        hdu.writeto(root+'_fftmoment.fits',clobber=True)
+
     fft_cube = np.ndarray(shape=datacube.shape,dtype=complex)
     for i in range(datacube.shape[0]):
         fft_cube[i,:,:] = fft_plot(datacube[i,:,:])
@@ -137,10 +164,12 @@ def fftclean(InputFile,OutputFile=None):
 
     # repair spikes in moment map
     repaired, output = mask_make(mask,fft_image0)
-    hdu = fits.PrimaryHDU(data=mask)
+    if SaveDiagnostics:
+        hdu = fits.PrimaryHDU(data=mask)
+        hdu.writeto(root+'_fftmask.fits',clobber=True)
 #    hdu.writeto('a24mom0mask.fits')
-   # hdu = fits.PrimaryHDU(data=np.abs(output))
-   # hdu.writeto('a24mom0fftmedian.fits')
+        hdu = fits.PrimaryHDU(data=np.abs(output))
+        hdu.writeto(root+'_fftmedian.fits',clobber=True)
     # use mask to sample and repair noise regions in each channel of fft cube
     cube_repair = np.ndarray(shape=fft_cube.shape,dtype=complex)
     inverse_cube = np.ndarray(shape=fft_cube.shape)
@@ -154,6 +183,7 @@ def fftclean(InputFile,OutputFile=None):
     head = fits.getheader(InputFile)
     cubewcs = WCS(head)
     OutputCube = SpectralCube(data=inverse_cube.astype(np.float32),wcs=cubewcs)
+#    import pdb; pdb.set_trace()
 
     if isinstance(OutputFile,basestring):
         OutputCube.write(OutputFile)
@@ -162,7 +192,7 @@ def fftclean(InputFile,OutputFile=None):
     else:
         return(OutputCube)
 
-    import pdb ; pdb.set_trace()
+#    import pdb ; pdb.set_trace()
 
 if __name__=="__main__":
     InputFile = sys.argv[1]
