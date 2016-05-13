@@ -64,7 +64,7 @@ def find_peaks(fftimage,fxx,fyy):
     #find peaks
     maxmap = ndimage.filters.maximum_filter(np.abs(maskpeak).real,size=[3,3])
     #maxima = (np.abs(maskpeak) == maxmap)
-    data_min = ndimage.filters.median_filter(np.abs(maskpeak).real, size=[3,3])
+    data_min = ndimage.filters.median_filter(np.abs(maskpeak).real, size=[9,9])
     diffmap = (maxmap - data_min)
     diff = (diffmap > threshold)
    
@@ -90,35 +90,26 @@ def fillbad(blanked):
     valid_mask = ~np.isnan(blanked)
     coords = np.array(np.nonzero(valid_mask)).T
     values = blanked[valid_mask]
-    it = interpolate.LinearNDInterpolator(coords, values, fill_value=0)
+    it = interpolate.LinearNDInterpolator(coords, values,fill_value=0)
     output = it(list(np.ndindex(blanked.shape))).reshape(blanked.shape)
     return(output)
 
 def mask_make(mask,image):
-
     # create map excluding central emission region
     noise_removed = image*mask
     coord_change = np.where(np.isnan(mask))
     blanked = np.copy(image)
     blanked *= mask
+
     # create median filter
     from scipy import interpolate
     valid_mask = ~np.isnan(blanked)
     coords = np.array(np.nonzero(valid_mask)).T
-    values = blanked[valid_mask]
+    values = np.log(np.abs(blanked[valid_mask]))
 
     it = interpolate.LinearNDInterpolator(coords, values, fill_value=0)
-    output = it(list(np.ndindex(image.shape))).reshape(image.shape)
+    output = np.exp(it(list(np.ndindex(image.shape))).reshape(image.shape))
 
-
-#    output = ndimage.filters.generic_filter(np.absolute(blanked).real,
-#                                            np.nanmedian,size=[1,15])
-#    output2 = ndimage.filters.generic_filter(output,
-#                                            np.nanmedian,size=[1,5])
-#    output[np.isnan(output)]=output2[np.isnan(output)]
-
-#    import pdb; pdb.set_trace()
-    # determine amplitude and random phase values to replace noise spikes
     amplitude = output[coord_change[0],coord_change[1]]
     phase = np.random.rand(coord_change[0].shape[0])
     real = amplitude.real*np.cos(2*np.pi*phase)
@@ -135,35 +126,25 @@ def fitswrite(initial_image, final_image, name):
     hdu = fits.PrimaryHDU(data = final_image, header=header)
     hdu.writeto(name,clobber=True)
     
-def fftclean(InputFile,OutputFile=None,SaveDiagnostics=False):
+def fftclean(InputFile,OutputFile=None,SaveDiagnostics=False,MomentOnly=False):
     print 'starting clean..'
     cubes = SpectralCube.read(InputFile,format='fits')
     root = InputFile.replace('.fits', '_fftclean')
     momentmap = cubes.moment0(axis=0)
-    moment0 = np.nan_to_num(momentmap.value)
 
-    moment0 = np.ndarray.astype(moment0,dtype=float)
     if SaveDiagnostics:
-        hdu = fits.PrimaryHDU(data=moment0)
+        hdu = fits.PrimaryHDU(data=momentmap.value)
         hdu.writeto(root+'_moment.fits',clobber=True)
 
+    moment0 = np.ndarray.astype(momentmap.value,dtype=float)
     moment0 = fillbad(moment0)
-    datacube = fits.getdata(InputFile)
-    datacube = np.nan_to_num(datacube)
-    datacube = np.ndarray.astype(datacube,dtype=float)
-    datacube = fillbadcube(datacube)
     fft_image0 = fft_plot(moment0)
+
     if SaveDiagnostics:
+        hdu = fits.PrimaryHDU(data=moment0)
+        hdu.writeto(root+'_moment_fillbad.fits',clobber=True)
         hdu = fits.PrimaryHDU(data=np.abs(fft_image0))
         hdu.writeto(root+'_fftmoment.fits',clobber=True)
-        hdu = fits.PrimaryHDU(data=moment0)
-        hdu.writeto(root+'_moment.fits',clobber=True)
-
-    fft_cube = np.ndarray(shape=datacube.shape,dtype=complex)
-    for i in range(datacube.shape[0]):
-        fft_cube[i,:,:] = fft_plot(datacube[i,:,:])
-        
-    print 'fft complete'
 
     # find frequency cubes
     fxx,fyy = frequency_calc(fft_image0)
@@ -174,14 +155,34 @@ def fftclean(InputFile,OutputFile=None,SaveDiagnostics=False):
 
     # repair spikes in moment map
     repaired, output = mask_make(mask,fft_image0)
+
     if SaveDiagnostics:
         hdu = fits.PrimaryHDU(data=mask)
         hdu.writeto(root+'_fftmask.fits',clobber=True)
-#    hdu.writeto('a24mom0mask.fits')
         hdu = fits.PrimaryHDU(data=np.abs(output))
         hdu.writeto(root+'_fftmedian.fits',clobber=True)
+        hdu = fits.PrimaryHDU(data=np.abs(repaired))
+        hdu.writeto(root+'_fftrepaired.fits',clobber=True)
         hdu = fits.PrimaryHDU(data=inverse_transform(repaired))
         hdu.writeto(root+'_repaired.fits',clobber=True)
+
+
+    if MomentOnly:
+        return
+
+    datacube = fits.getdata(InputFile)
+    datacube = np.nan_to_num(datacube)
+    datacube = np.ndarray.astype(datacube,dtype=float)
+    datacube = fillbadcube(datacube)
+
+
+
+    fft_cube = np.ndarray(shape=datacube.shape,dtype=complex)
+    for i in range(datacube.shape[0]):
+        fft_cube[i,:,:] = fft_plot(datacube[i,:,:])
+        
+    print 'fft complete'
+
 
     # use mask to sample and repair noise regions in each channel of fft cube
     cube_repair = np.ndarray(shape=fft_cube.shape,dtype=complex)
