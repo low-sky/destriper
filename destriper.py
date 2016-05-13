@@ -83,7 +83,7 @@ def inverse_transform(repaired_image):
 def fillbadcube(cube):
     for i in np.arange(cube.shape[0]):
         cube[i,:,:] = fillbad(cube[i,:,:])
-
+    return(cube)
 
 def fillbad(blanked):
     from scipy import interpolate
@@ -133,7 +133,7 @@ def fitswrite(initial_image, final_image, name):
     #header = initial_image.wcs.to_header()
     header = fits.getheader(initial_image)
     hdu = fits.PrimaryHDU(data = final_image, header=header)
-    hdu.writeto(name)
+    hdu.writeto(name,clobber=True)
     
 def fftclean(InputFile,OutputFile=None,SaveDiagnostics=False):
     print 'starting clean..'
