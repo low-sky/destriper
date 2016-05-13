@@ -80,12 +80,16 @@ def inverse_transform(repaired_image):
     inverse0 = fftpack.ifft2(inverseshift0)
     return inverse0.real
 
+def fillbadcube(cube):
+    for i in np.arange(cube.shape[0]):
+        cube[i,:,:] = fillbad(cube[i,:,:])
+
+
 def fillbad(blanked):
     from scipy import interpolate
     valid_mask = ~np.isnan(blanked)
     coords = np.array(np.nonzero(valid_mask)).T
     values = blanked[valid_mask]
-
     it = interpolate.LinearNDInterpolator(coords, values, fill_value=0)
     output = it(list(np.ndindex(blanked.shape))).reshape(blanked.shape)
     return(output)
@@ -139,15 +143,21 @@ def fftclean(InputFile,OutputFile=None,SaveDiagnostics=False):
     moment0 = np.nan_to_num(momentmap.value)
 
     moment0 = np.ndarray.astype(moment0,dtype=float)
+    if SaveDiagnostics:
+        hdu = fits.PrimaryHDU(data=moment0)
+        hdu.writeto(root+'_moment.fits',clobber=True)
 
+    moment0 = fillbad(moment0)
     datacube = fits.getdata(InputFile)
     datacube = np.nan_to_num(datacube)
     datacube = np.ndarray.astype(datacube,dtype=float)
-            
+    datacube = fillbadcube(datacube)
     fft_image0 = fft_plot(moment0)
     if SaveDiagnostics:
         hdu = fits.PrimaryHDU(data=np.abs(fft_image0))
         hdu.writeto(root+'_fftmoment.fits',clobber=True)
+        hdu = fits.PrimaryHDU(data=moment0)
+        hdu.writeto(root+'_moment.fits',clobber=True)
 
     fft_cube = np.ndarray(shape=datacube.shape,dtype=complex)
     for i in range(datacube.shape[0]):
@@ -170,6 +180,9 @@ def fftclean(InputFile,OutputFile=None,SaveDiagnostics=False):
 #    hdu.writeto('a24mom0mask.fits')
         hdu = fits.PrimaryHDU(data=np.abs(output))
         hdu.writeto(root+'_fftmedian.fits',clobber=True)
+        hdu = fits.PrimaryHDU(data=inverse_transform(repaired))
+        hdu.writeto(root+'_repaired.fits',clobber=True)
+
     # use mask to sample and repair noise regions in each channel of fft cube
     cube_repair = np.ndarray(shape=fft_cube.shape,dtype=complex)
     inverse_cube = np.ndarray(shape=fft_cube.shape)
